@@ -40,7 +40,7 @@ class TurnusValidator {
 
     // 1. Preferencje językowe
     final bLangWeight = _germanLevelWeight(betreuer.deutschKenntnisse);
-    final kReqLang = kunde.deutschKenntnisse;
+    final kReqLang = kunde.deutschForderungen;
     if (kReqLang != null && kReqLang.isNotEmpty) {
       final kLangWeight = _germanLevelWeight(kReqLang);
       if (bLangWeight < kLangWeight) {
@@ -51,7 +51,7 @@ class TurnusValidator {
     }
 
     // 2. Preferencje płci (Podopieczny -> Opiekun)
-    final kPrefSex = kunde.betreuungGeschlecht.toLowerCase().trim();
+    final kPrefSex = kunde.betreuerGeschlecht.toLowerCase().trim();
     final bSex = betreuer.geschlecht.toLowerCase().trim();
     if (kPrefSex.isNotEmpty && !kPrefSex.contains('obojętn')) {
       final bIsMale = bSex.startsWith('m');
@@ -59,7 +59,7 @@ class TurnusValidator {
       final kWantsMale = kPrefSex.contains('mężczyzna');
       if ((kWantsFemale && bIsMale) || (kWantsMale && !bIsMale)) {
         issues.add(TurnusValidationIssue(
-          message: 'Podopieczny ma inne preferencje co do płci opiekuna (Preferuje: ${kunde.betreuungGeschlecht})',
+          message: 'Podopieczny ma inne preferencje co do płci opiekuna (Preferuje: ${kunde.betreuerGeschlecht})',
         ));
       }
     }
@@ -79,7 +79,8 @@ class TurnusValidator {
     }
 
     // 4. Wymagane prawo jazdy i gotowość do prowadzenia auta
-    final kNeedsDriver = kunde.fuehrerschein;
+    final reqFs = kunde.fuehrerschein.toString().trim().toLowerCase();
+    final kNeedsDriver = reqFs == 'wymagane' || reqFs == 'true';
     if (kNeedsDriver) {
       if (!betreuer.fuehrerschein) {
         issues.add(TurnusValidationIssue(
@@ -93,12 +94,11 @@ class TurnusValidator {
     }
 
     // 5. Wymóg osoby niepalącej
-    final kNonSmoking = kunde.raucher;
-    if (kNonSmoking && betreuer.raucher) {
+    if (kunde.hilfsarbeiten.contains('rauchen') && betreuer.raucher) {
       issues.add(TurnusValidationIssue(
         message: 'Podopieczny wymaga osoby niepalącej (Opiekun jest osobą palącą)',
       ));
-    }
+    } 
 
     // 6. Opieka nad dwiema osobami
     final isDoubleCare = kunde.betreuungZweiPersonen;
@@ -109,22 +109,13 @@ class TurnusValidator {
     }
 
     // 7. Zwierzęta
-    final hasPets = kunde.betreuungHaustiere;
-    if (hasPets && !betreuer.betreuungHaustiere) {
+    if (kunde.hausarbeiten.contains('haustiere') && !betreuer.betreuungHaustiere) {
       issues.add(TurnusValidationIssue(
         message: 'Opiekun nie chce się opiekować zwierzętami (Podopieczny wymaga opieki nad zwierzętami)',
       ));
     }
 
-    // 8. Opieka nocna (weryfikacja na podstawie notatek lub flagi w modelu)
-    final kNeedsNight = kunde.notizen.toLowerCase().contains('noc') || kunde.notizen.toLowerCase().contains('nocna');
-    final bNoNight = betreuer.notizen?.toLowerCase().contains('bez nocy') == true ||
-        betreuer.notizen?.toLowerCase().contains('nie wstaje w nocy') == true;
-    if (kNeedsNight && bNoNight) {
-      issues.add(TurnusValidationIssue(
-        message: 'Podopieczny wymaga opieki w nocy, a opiekun deklaruje brak gotowości do pracy nocnej',
-      ));
-    }
+    // 8. Opieka nocna
 
     // 9. Długość wyjazdu (Cykle opiekuna)
     if (betreuer.betreuungsZyklen.isNotEmpty) {

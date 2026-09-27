@@ -19,7 +19,15 @@ class Kunde {
   String? profileImageUrl;
   bool? isAvailable;
   int? tagessatz;
+  final String? datumBedarf;
   String? pflegedienstHaeufigkeit;
+  // Zweite Person
+  final bool betreuungZweiPersonen;
+  final String? zweitePersonVorname;
+  final String? zweitePersonName;
+  final String? zweitePersonGeburtsdatum;
+  final int? zweitePersonPflegegrad;
+  final String? zweitePersonDiagnosen;
   // Ansprechperson
   String vornameAnsprechperson;
   String nachnameAnsprechperson;
@@ -56,12 +64,19 @@ class Kunde {
     this.profileImageUrl,
     this.isAvailable,
     this.tagessatz,
+    this.datumBedarf,
     this.pflegedienstHaeufigkeit,
     this.hilfsmittel = const [],
     this.krankheiten = const [],
     this.hausarbeiten = const [],
     this.hilfsarbeiten = const [],
     this.zimmerausstattung = const [],
+    required this.betreuungZweiPersonen,
+    this.zweitePersonVorname,
+    this.zweitePersonName,
+    this.zweitePersonGeburtsdatum,
+    this.zweitePersonPflegegrad,
+    this.zweitePersonDiagnosen,
     required this.vornameAnsprechperson,
     required this.nachnameAnsprechperson,
     required this.anschriftAnsprechperson,
@@ -91,12 +106,19 @@ class Kunde {
     'profileImageUrl': profileImageUrl,
     'isAvailable': isAvailable,
     'tagessatz': tagessatz,
+    'datumBedarf': datumBedarf,
     'pflegedienstHaeufigkeit': pflegedienstHaeufigkeit,
     'hilfsmittel': hilfsmittel,
     'krankheiten': krankheiten,
     'hausarbeiten': hausarbeiten,
     'hilfsarbeiten': hilfsarbeiten,
     'zimmerausstattung': zimmerausstattung,
+    'betreuungZweiPersonen': betreuungZweiPersonen, 
+    'zweitePersonVorname': zweitePersonVorname,
+    'zweitePersonName': zweitePersonName,
+    'zweitePersonGeburtsdatum': zweitePersonGeburtsdatum,
+    'zweitePersonPflegegrad': zweitePersonPflegegrad,
+    'zweitePersonDiagnosen': zweitePersonDiagnosen,
     'vornameAnsprechperson': vornameAnsprechperson,
     'nachnameAnsprechperson': nachnameAnsprechperson,
     'anschriftAnsprechperson': anschriftAnsprechperson,
@@ -125,6 +147,7 @@ class Kunde {
     profileImageUrl: json['profileImageUrl'],
     isAvailable: json['isAvailable'] ?? true,
     tagessatz: json['tagessatz'],
+    datumBedarf: json['datumBedarf'],
     pflegedienstHaeufigkeit: json['pflegedienstHaeufigkeit'] as String?,
     hilfsmittel: List<String>.from(json['hilfsmittel'] ?? []),
     krankheiten: List<String>.from(json['krankheiten'] ?? []),
@@ -133,6 +156,12 @@ class Kunde {
     zimmerausstattung: List<String>.from(json['zimmerausstattung'] ?? []),
     medikamenteVerteilung: List<String>.from(json['medikamenteVerteilung'] ?? []),
     toilettenGang: List<String>.from(json['toilettenGang'] ?? []),
+    betreuungZweiPersonen: json['betreuungZweiPersonen'],
+    zweitePersonVorname: json['zweitePersonVorname'],
+    zweitePersonName: json['zweitePersonName'],
+    zweitePersonGeburtsdatum: json['zweitePersonGeburtsdatum'],
+    zweitePersonPflegegrad: json['zweitePersonPflegegrad'],
+    zweitePersonDiagnosen: json['zweitePersonDiagnosen'],
     vornameAnsprechperson: json['vornameAnsprechperson'],
     nachnameAnsprechperson: json['nachnameAnsprechperson'],
     anschriftAnsprechperson: json['anschriftAnsprechperson'],

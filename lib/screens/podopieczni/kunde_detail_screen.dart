@@ -4,24 +4,116 @@ import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/kunde.dart';
+import '../../models/turnus.dart';
+import '../../services/pdf_service.dart';
+import '../../services/turnus_service.dart';
 import 'kunde_edit_screen.dart';
 
 class KundeDetailScreen extends StatefulWidget {
   final Kunde kunde;
+  final VoidCallback? onDataChanged;
 
-  const KundeDetailScreen({super.key, required this.kunde});
+  const KundeDetailScreen({
+    super.key,
+    required this.kunde,
+    this.onDataChanged,
+  });
 
   @override
   State<KundeDetailScreen> createState() => _KundeDetailScreenState();
 }
 
-class _KundeDetailScreenState extends State<KundeDetailScreen> {
+class _KundeDetailScreenState extends State<KundeDetailScreen>
+    with SingleTickerProviderStateMixin {
   late Kunde _currentKunde;
+  late AnimationController _fabAnimationController;
+  late Animation<double> _expandAnimation;
+  bool _isFabOpen = false;
 
   @override
   void initState() {
     super.initState();
     _currentKunde = widget.kunde;
+    _fabAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _expandAnimation = CurvedAnimation(
+      parent: _fabAnimationController,
+      curve: Curves.easeOutBack,
+      reverseCurve: Curves.easeIn,
+    );
+  }
+
+  @override
+  void dispose() {
+    _fabAnimationController.dispose();
+    super.dispose();
+  }
+
+  void _toggleFabMenu() {
+    setState(() {
+      _isFabOpen = !_isFabOpen;
+      if (_isFabOpen) {
+        _fabAnimationController.forward();
+      } else {
+        _fabAnimationController.reverse();
+      }
+    });
+  }
+
+  void _closeFabMenu() {
+    if (_isFabOpen) {
+      setState(() {
+        _isFabOpen = false;
+        _fabAnimationController.reverse();
+      });
+    }
+  }
+
+  Future<void> _addNewTurnusForThisKunde() async {
+    _closeFabMenu();
+    final createdTurnus = await TurnusService.planAndSaveTurnus(
+      context: context,
+      lockedKunde: _currentKunde,
+    );
+    if (createdTurnus != null && mounted) {
+      widget.onDataChanged?.call();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Zaplanowano opiekę: ${createdTurnus.betreuerName}!'),
+          backgroundColor: Colors.deepPurple.shade800,
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteProfile() async {
+    _closeFabMenu();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Usuń profil'),
+        content: Text(
+          'Czy na pewno chcesz usunąć profil ${_currentKunde.vorname} ${_currentKunde.name}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Anuluj'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Usuń'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && mounted) {
+      Navigator.pop(context, 'DELETE');
+    }
   }
 
   Future<void> _openEdit() async {
@@ -38,7 +130,6 @@ class _KundeDetailScreenState extends State<KundeDetailScreen> {
       setState(() {
         _currentKunde = result;
       });
-      // Zwracamy zaktualizowany obiekt przy powrocie
       if (mounted) Navigator.pop(context, result);
     }
   }
@@ -56,18 +147,18 @@ class _KundeDetailScreenState extends State<KundeDetailScreen> {
       final croppedPath = await _cropCircleImage(context, pickedFile.path);
       if (croppedPath != null) {
         setState(() {
-        _currentKunde.profileImageUrl = croppedPath;
-        widget.kunde.profileImageUrl = croppedPath;
-      });
+          _currentKunde.profileImageUrl = croppedPath;
+          widget.kunde.profileImageUrl = croppedPath;
+        });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Zaktualizowano zdjęcie profilowe'),
-            duration: Duration(seconds: 3)
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Zaktualizowano zdjęcie profilowe'),
+              duration: Duration(seconds: 3),
             ),
-        );
-      }
+          );
+        }
       }
     }
   }
@@ -90,77 +181,77 @@ class _KundeDetailScreenState extends State<KundeDetailScreen> {
         builder: (ctx) => Scaffold(
           backgroundColor: Colors.black,
           appBar: AppBar(
-              backgroundColor: Colors.black,
-              iconTheme: const IconThemeData(color: Colors.white),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.crop),
-                  tooltip: 'Dopasuj kadr',
-                  onPressed: () async {
-                    final cropped = await _cropCircleImage(ctx, imagePath);
-                    if (cropped != null) {
-                      setState(() {
-                        _currentKunde.profileImageUrl = cropped;
-                        widget.kunde.profileImageUrl = cropped;
-                      });
-                      if (ctx.mounted) Navigator.pop(ctx);
-                    }
-                  },
-                ),
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert, color: Colors.white),
-                  onSelected: (val) async {
-                    if (val == 'CHANGE') {
-                      Navigator.pop(ctx);
-                      _changeAvatar();
-                    } else if (val == 'DELETE') {
-                      setState(() {
-                        _currentKunde.profileImageUrl = null;
-                        widget.kunde.profileImageUrl = null;
-                      });
-                      Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Usunięto zdjęcie profilowe')),
-                      );
-                    }
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: 'CHANGE',
-                      child: Row(
-                        children: [
-                          Icon(Icons.photo_library_outlined, size: 20),
-                          SizedBox(width: 8),
-                          Text('Zmień zdjęcie'),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'DELETE',
-                      child: Row(
-                        children: [
-                          Icon(Icons.delete_outline, size: 20, color: Colors.red),
-                          SizedBox(width: 8),
-                          Text('Usuń zdjęcie', style: TextStyle(color: Colors.red)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            body: Center(
-              child: InteractiveViewer(
-                minScale: 0.8,
-                maxScale: 4.0,
-                child: Image.file(File(imagePath)),
+            backgroundColor: Colors.black,
+            iconTheme: const IconThemeData(color: Colors.white),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.crop),
+                tooltip: 'Dopasuj kadr',
+                onPressed: () async {
+                  final cropped = await _cropCircleImage(ctx, imagePath);
+                  if (cropped != null) {
+                    setState(() {
+                      _currentKunde.profileImageUrl = cropped;
+                      widget.kunde.profileImageUrl = cropped;
+                    });
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  }
+                },
               ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: Colors.white),
+                onSelected: (val) async {
+                  if (val == 'CHANGE') {
+                    Navigator.pop(ctx);
+                    _changeAvatar();
+                  } else if (val == 'DELETE') {
+                    setState(() {
+                      _currentKunde.profileImageUrl = null;
+                      widget.kunde.profileImageUrl = null;
+                    });
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Usunięto zdjęcie profilowe')),
+                    );
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: 'CHANGE',
+                    child: Row(
+                      children: [
+                        Icon(Icons.photo_library_outlined, size: 20),
+                        SizedBox(width: 8),
+                        Text('Zmień zdjęcie'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'DELETE',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                        SizedBox(width: 8),
+                        Text('Usuń zdjęcie', style: TextStyle(color: Colors.red)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              minScale: 0.8,
+              maxScale: 4.0,
+              child: Image.file(File(imagePath)),
             ),
           ),
         ),
+      ),
     );
   }
-  
+
   Future<String?> _cropCircleImage(BuildContext context, String sourcePath) async {
     final croppedFile = await ImageCropper().cropImage(
       sourcePath: sourcePath,
@@ -205,401 +296,121 @@ class _KundeDetailScreenState extends State<KundeDetailScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final k = _currentKunde;
-    final isAvailable = k.isAvailable ?? true;
-    final isMale = k.geschlecht.toLowerCase().startsWith('m');
-    final statusText = isAvailable
-          ? (isMale ? '● Dostępny' : '● Dostępna')
-          : (isMale ? '○ Niedostępny' : '○ Niedostępna');
-
-    final purpleTheme = ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: Colors.deepPurple,
-        brightness: Brightness.light,
-        ),
-      scaffoldBackgroundColor: const Color(0xFFF7F5FA),
-    );
-
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop) return;
-        Navigator.pop(context, _currentKunde);
-      },
-      child: Theme(
-        data: purpleTheme,
-        child: Scaffold(
-          backgroundColor: Colors.grey.shade100,
-          appBar: AppBar(
-          leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context, _currentKunde),
-        ),
-        title: Text('Podopieczny'),
-        backgroundColor: purpleTheme.colorScheme.primaryContainer,
-        foregroundColor: purpleTheme.colorScheme.onPrimaryContainer,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.edit_outlined),
-            tooltip: 'Edytuj profil',
-            onPressed: _openEdit,
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Karta nagłówkowa z awatarem i statusem
-          Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            elevation: 0,
-            color: Colors.white,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: _handleAvatarTap,
-                    child: Stack(
-                      children: [
-                  CircleAvatar(
-                    radius: 36,
-                    backgroundColor: Colors.deepPurple.shade50,
-                    backgroundImage: (k.profileImageUrl != null &&
-                            k.profileImageUrl!.isNotEmpty &&
-                            File(k.profileImageUrl!).existsSync())
-                        ? FileImage(File(k.profileImageUrl!))
-                        : null,
-                    child: (k.profileImageUrl == null || k.profileImageUrl!.isEmpty)
-                        ? Text(
-                            '${k.vorname.isNotEmpty ? k.vorname[0] : ""}${k.name.isNotEmpty ? k.name[0] : ""}',
-                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.deepPurple),
-                          )
-                        : null,
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primary,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                      ),
-                      child: const Icon(
-                        Icons.camera_alt,
-                        size: 14,
+  Widget _buildSpeedDialItem({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return ScaleTransition(
+      scale: _expandAnimation,
+      child: FadeTransition(
+        opacity: _expandAnimation,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Material(
+            color: color,
+            elevation: 5,
+            shadowColor: Colors.black.withValues(alpha: 0.35),
+            borderRadius: BorderRadius.circular(35),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(35),
+              onTap: () {
+                _closeFabMenu();
+                onTap();
+              },
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 48),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 22, color: Colors.white),
+                    const SizedBox(width: 12),
+                    Text(
+                      label,
+                      style: const TextStyle(
                         color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        letterSpacing: 0.3,
                       ),
                     ),
-                  ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${k.vorname} ${k.name}',
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 4),
-                        InkWell(
-                          onTap: k.anschrift.isNotEmpty ? () => _openGoogleMapsNavigation(k.anschrift) : null,
-                          borderRadius: BorderRadius.circular(4),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 2),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.location_on_outlined,
-                                  size: 15,
-                                  color: k.anschrift.isNotEmpty ? Colors.deepPurple : Colors.grey,
-                                ),
-                                const SizedBox(width: 4),
-                                Flexible(
-                                  child: Text(
-                                    k.anschrift.isNotEmpty ? k.anschrift : 'Brak adresu',
-                                    style: TextStyle(
-                                      color: k.anschrift.isNotEmpty ? Colors.deepPurple.shade700 : Colors.grey.shade600,
-                                      fontSize: 13,
-                                      decoration: k.anschrift.isNotEmpty ? TextDecoration.underline : TextDecoration.none,
-                                      decorationColor: Colors.deepPurple.shade200,
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: (k.isAvailable ?? true) ? Colors.green.shade50 : Colors.red.shade50,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            statusText,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: (k.isAvailable ?? true) ? Colors.green.shade800 : Colors.red.shade800,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Dane podstawowe
-          _buildInfoCard(
-            title: 'Dane osobowe',
-            icon: Icons.badge_outlined,
-            children: [
-              _buildDetailRow(Icons.wc_outlined, 'Płeć', k.geschlecht),
-              _buildDetailRow(Icons.cake_outlined, 'Data urodzenia', k.geburtsdatum?.isNotEmpty == true ? k.geburtsdatum! : 'Nie podano'),
-              _buildDetailRow(Icons.phone_outlined, 'Telefon', k.telNr.isNotEmpty ? k.telNr : 'Nie podano'),
-              _buildDetailRow(Icons.favorite_outline, 'Stan cywilny', k.familienstand),
-              _buildDetailRow(Icons.money_outlined, 'Stawka dniowa', k.tagessatz != null ? '${k.tagessatz} € / dzień' : 'Nie podano'),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          if (k.vornameAnsprechperson != null && k.vornameAnsprechperson!.trim().isNotEmpty) ...[
-          _buildInfoCard(
-            title: 'Osoba do kontaktu',
-            icon: Icons.badge_outlined,
-            children: [
-              _buildDetailRow(Icons.person, 'Imię', k.vornameAnsprechperson),
-              _buildDetailRow(Icons.person_outlined, 'Nazwisko', k.nachnameAnsprechperson),
-              _buildDetailRow(Icons.phone_outlined, 'Telefon', k.telNrAnsprechperson),
-              _buildDetailRow(Icons.home_outlined, 'Adres', k.anschriftAnsprechperson),
-              _buildDetailRow(Icons.alternate_email, 'Mail', k.emailAnsprechperson),
-              _buildDetailRow(Icons.favorite, 'Relacja', k.bezugAnsprechperson),
-            ],
-          ),
-          ],
-          // Kwalifikacje
-          _buildInfoCard(
-            title: 'Zdrowie i choroby',
-            icon: Icons.verified_outlined,
-            children: [
-              _buildDetailRow(Icons.verified_outlined, 'Stopień opieki', k.pflegegrad != null ? 'Pflegegrad ${k.pflegegrad}' : 'Brak'),
-              _buildDetailRow(Icons.monitor_weight_outlined, 'Waga', k.gewicht != null ? '${k.gewicht} kg' : 'Nie podano'),
-              _buildDetailRow(Icons.height_outlined, 'Wzrost', k.groesse != null ? '${k.groesse} cm' : 'Nie podano'),
-              _buildDetailRow(Icons.medication_outlined, 'Dzielenie leków', k.medikamenteVerteilung.isEmpty ? 'Nie określono' : k.medikamenteVerteilung.map((id) => KundeOptions.findLabel(KundeOptions.medikamenteVerteilung, id)).join(' oraz '),),
-              
-              const Divider(height: 12),
-              const SizedBox(height: 8),
-              const Row(
-                children: [
-                  Icon(Icons.wc_outlined, size: 18, color: Colors.deepPurple),
-                  SizedBox(width: 8),
-                  Text(
-                    'Toaleta i fizjologia',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.black87),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              () {
-                final items = k.toilettenGang.map((id) => KundeOptions.findLabel(KundeOptions.toilettenGang, id)).toList();
-                if (k.krankheiten.contains('inkontinenz') && !k.toilettenGang.contains('inkontinenz')) {
-                  items.add('Inkontynencja moczowa');
-                }
-                if (k.hilfsmittel.contains('toilettenstuhl') && !k.toilettenGang.contains('toilettenstuhl')) {
-        items.add('Krzesło toaletowe');
-                }
-
-                if (items.isEmpty) {
-                  return const Text('Samodzielnie / Brak problemów', style: TextStyle(color: Colors.grey, fontSize: 13));
-                }
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: items.map((label) {
-                  final isCritical = label.toLowerCase().contains('cewnik') ||
-                                      label.toLowerCase().contains('stomia');
-                  return Chip(
-                    avatar: Icon(
-                      isCritical ? Icons.warning_amber_rounded : Icons.check_circle_outline,
-                      size: 15,
-                      color: isCritical ? Colors.amber.shade900 : Colors.deepPurple,
-                    ),
-                    label: Text(label),
-                    backgroundColor: isCritical ? Colors.amber.shade50 : Colors.deepPurple.shade50,
-                    side: BorderSide(color: isCritical ? Colors.amber.shade200 : Colors.deepPurple.shade100),
-                  );
-                  }).toList(),
-                );
-              }(),
-              const SizedBox(height: 10),
-              const Divider(height: 12),
-              const SizedBox(height: 12),
-              const Text('Choroby', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.black54),),
-              const SizedBox(height: 8),
-              if (k.krankheiten.isEmpty)
-                const Text('Brak zdiagnozowanych chorób', style: TextStyle(color: Colors.grey))
-              else
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: k.krankheiten.map((id) {
-                    final label = KundeOptions.findLabel(KundeOptions.krankheiten, id);
-                    return Chip(
-                      avatar: const Icon(Icons.healing, size: 16, color: Colors.deepPurple),
-                      label: Text(label),
-                      backgroundColor: Colors.deepPurple.shade50,
-                      side: BorderSide(color: Colors.deepPurple.shade100),
-                    );
-                  }).toList(),
+                  ],
                 ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // Preferencje zlecenia
-          _buildInfoCard(
-            title: 'Wymagane czynności i pomoce',
-            icon: Icons.assignment_outlined,
-            children: [
-              if (k.hilfsarbeiten.isEmpty && k.hausarbeiten.isEmpty && k.hilfsmittel.isEmpty)
-                const Text('Brak zdefiniowanych zadań', style: TextStyle(color: Colors.grey))
-              else ...[
-                if (k.hilfsarbeiten.isNotEmpty) ...[
-                  const Text(
-                    'Pomoc przy osobie:',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.black54),
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: k.hilfsarbeiten.map((id) {
-                      return Chip(
-                        label: Text(KundeOptions.findLabel(KundeOptions.hilfsarbeiten, id)),
-                        backgroundColor: Colors.purple.shade50,
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                if (k.hausarbeiten.isNotEmpty) ...[
-                  const Text(
-                    'Prowadzenie domu:',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.black54),
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: k.hausarbeiten.map((id) {
-                      return Chip(
-                        label: Text(KundeOptions.findLabel(KundeOptions.hausarbeiten, id)),
-                        backgroundColor: Colors.grey.shade100,
-                      );
-                    }).toList(),
-                  ),
-                ],
-                if (k.hilfsmittel.isNotEmpty) ...[
-                  const Text(
-                    'Dostępne pomoce:',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.black54),
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      if (k.hilfsmittel.contains('pflegedienst'))
-                        Chip(
-                          avatar: const Icon(Icons.local_hospital_outlined, size: 16, color: Colors.deepPurple),
-                          label: Text(
-                            k.pflegedienstHaeufigkeit != null && k.pflegedienstHaeufigkeit!.isNotEmpty ? 'Pflegedienst: ${k.pflegedienstHaeufigkeit}' : 'Pflegedienst',
-                            style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.deepPurple),
-                          ),
-                          backgroundColor: Colors.deepPurple.shade50,
-                          side: BorderSide(color: Colors.deepPurple.shade200),
-                        ),
-                      
-                      ...k.hilfsmittel.where((id) => id != 'pflegedienst').map((id) {
-                      return Chip(
-                        label: Text(KundeOptions.findLabel(KundeOptions.hilfsmittel, id)),
-                        backgroundColor: Colors.grey.shade100,
-                      );
-                    }),
-                    ],
-                  ),
-                ],
-              ],
-            ],
-          ),
-
-          const SizedBox(height: 4),
-          _buildInfoCard(
-            title: 'Wymogi dotyczące opiekuna',
-            icon: Icons.badge_outlined,
-            children: [
-              _buildCheckRow(Icons.smoke_free_outlined, 'Niepaląca osoba', k.hasHilfsarbeiten('rauchen')),
-              _buildCheckRow(Icons.nightlight_round_outlined, 'Opieka w nocy', k.hasHilfsarbeiten('nachtarbeiten')),
-              _buildCheckRow(Icons.yard_outlined, 'Prace w ogrodzie', k.hasHilfsarbeiten('gartenarbeiten')),
-              _buildDetailRow(Icons.translate_outlined, 'Znajomość niemieckiego', k.deutschForderungen),
-              _buildDetailRow(Icons.wc_outlined, 'Preferowana płeć opiekuna', k.betreuerGeschlecht),
-              _buildDetailRow(Icons.directions_car_outlined, 'Prawo jazdy', k.fuehrerschein),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _buildInfoCard(
-            title: 'Warunki mieszkaniowe',
-            icon: Icons.badge_outlined,
-            children: [
-              _buildDetailRow(Icons.location_city_outlined, 'Miejsce pobytu', k.betreuungsOrt),
-              _buildDetailRow(Icons.night_shelter_outlined, 'Sytuacja mieszkalna', k.wohnortSituation),
-            const SizedBox(height: 10),
-            const Text(
-              'Wyposażenie pokoju:',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.grey)
-            ),
-            const SizedBox(height: 6),
-            if (k.zimmerausstattung.isEmpty)
-              const Text('Brak zdefiniowanego wyposażenia', style: TextStyle(color: Colors.black54))
-            else
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: k.zimmerausstattung.map((id) {
-                  final label = KundeOptions.findLabel(KundeOptions.zimmerausstattung, id);
-                  return Chip(
-                    avatar: const Icon(Icons.check, size: 16, color: Colors.deepPurple),
-                    label: Text(label),
-                    backgroundColor: Colors.deepPurple.shade50,
-                    side: BorderSide(color: Colors.deepPurple.shade100),
-                  );
-                }).toList(),
               ),
-            ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSpeedDialFab() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (_isFabOpen) ...[
+          _buildSpeedDialItem(
+            icon: Icons.add_alarm,
+            label: 'Zaplanuj wyjazd',
+            color: Colors.teal.shade700,
+            onTap: _addNewTurnusForThisKunde,
+          ),
+          _buildSpeedDialItem(
+            icon: Icons.edit_outlined,
+            label: 'Edytuj profil',
+            color: Colors.deepPurple.shade600,
+            onTap: _openEdit,
+          ),
+          _buildSpeedDialItem(
+            icon: Icons.picture_as_pdf_outlined,
+            label: 'Eksportuj do PDF',
+            color: Colors.indigo.shade600,
+            onTap: () {
+               PdfService.generateKundePdf(context, _currentKunde);
+            },
+          ),
+          _buildSpeedDialItem(
+            icon: Icons.delete_outline,
+            label: 'Usuń profil',
+            color: Colors.redAccent.shade700,
+            onTap: _confirmDeleteProfile,
           ),
         ],
-      ),
-      ),
-    ),
+        SizedBox(
+          height: 56,
+          child: FloatingActionButton.extended(
+            heroTag: 'fab_kunde_speed_dial',
+            backgroundColor: _isFabOpen ? Colors.grey.shade900 : Colors.deepPurple,
+            foregroundColor: Colors.white,
+            elevation: 6,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            onPressed: _toggleFabMenu,
+            icon: AnimatedBuilder(
+              animation: _expandAnimation,
+              builder: (context, child) {
+                return Transform.rotate(
+                  angle: _expandAnimation.value * 3.14159,
+                  child: Icon(
+                    _isFabOpen ? Icons.close : Icons.star_rounded,
+                    size: 26,
+                  ),
+                );
+              },
+            ),
+            label: Text(
+              _isFabOpen ? 'Zamknij' : 'Opcje profilu',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -674,6 +485,424 @@ class _KundeDetailScreenState extends State<KundeDetailScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final k = _currentKunde;
+    final isAvailable = k.isAvailable ?? true;
+    final isMale = k.geschlecht.toLowerCase().startsWith('m');
+    final statusText = isAvailable
+        ? (isMale ? '● Dostępny' : '● Dostępna')
+        : (isMale ? '○ Niedostępny' : '○ Niedostępna');
+
+    final purpleTheme = ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: Colors.deepPurple,
+        brightness: Brightness.light,
+      ),
+      scaffoldBackgroundColor: const Color(0xFFF7F5FA),
+    );
+
+    return PopScope(
+      canPop: !_isFabOpen,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_isFabOpen) {
+          _closeFabMenu();
+        } else {
+          Navigator.pop(context, _currentKunde);
+        }
+      },
+      child: Theme(
+        data: purpleTheme,
+        child: Scaffold(
+          backgroundColor: const Color(0xFFF7F5FA),
+          appBar: AppBar(
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => Navigator.pop(context, _currentKunde),
+            ),
+            title: const Text('Podopieczny'),
+            backgroundColor: purpleTheme.colorScheme.primaryContainer,
+            foregroundColor: purpleTheme.colorScheme.onPrimaryContainer,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.edit_outlined),
+                tooltip: 'Edytuj profil',
+                onPressed: _openEdit,
+              ),
+            ],
+          ),
+          floatingActionButton: _buildSpeedDialFab(),
+          body: Stack(
+            children: [
+              ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
+                children: [
+                  Card(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    elevation: 0,
+                    color: Colors.white,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          GestureDetector(
+                            onTap: _handleAvatarTap,
+                            child: Stack(
+                              children: [
+                                CircleAvatar(
+                                  radius: 36,
+                                  backgroundColor: Colors.deepPurple.shade50,
+                                  backgroundImage: (k.profileImageUrl != null &&
+                                          k.profileImageUrl!.isNotEmpty &&
+                                          File(k.profileImageUrl!).existsSync())
+                                      ? FileImage(File(k.profileImageUrl!))
+                                      : null,
+                                  child: (k.profileImageUrl == null || k.profileImageUrl!.isEmpty)
+                                      ? Text(
+                                          '${k.vorname.isNotEmpty ? k.vorname[0] : ""}${k.name.isNotEmpty ? k.name[0] : ""}',
+                                          style: const TextStyle(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.deepPurple,
+                                          ),
+                                        )
+                                      : null,
+                                ),
+                                Positioned(
+                                  bottom: 0,
+                                  right: 0,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context).colorScheme.primary,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.white, width: 2),
+                                    ),
+                                    child: const Icon(
+                                      Icons.camera_alt,
+                                      size: 14,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${k.vorname} ${k.name}',
+                                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 4),
+                                InkWell(
+                                  onTap: k.anschrift.isNotEmpty ? () => _openGoogleMapsNavigation(k.anschrift) : null,
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 2),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.location_on_outlined,
+                                          size: 15,
+                                          color: k.anschrift.isNotEmpty ? Colors.deepPurple : Colors.grey,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Flexible(
+                                          child: Text(
+                                            k.anschrift.isNotEmpty ? k.anschrift : 'Brak adresu',
+                                            style: TextStyle(
+                                              color: k.anschrift.isNotEmpty ? Colors.deepPurple.shade700 : Colors.grey.shade600,
+                                              fontSize: 13,
+                                              decoration: k.anschrift.isNotEmpty ? TextDecoration.underline : TextDecoration.none,
+                                              decorationColor: Colors.deepPurple.shade200,
+                                            ),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: (k.isAvailable ?? true) ? Colors.green.shade50 : Colors.red.shade50,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    statusText,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: (k.isAvailable ?? true) ? Colors.green.shade800 : Colors.red.shade800,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildInfoCard(
+                    title: 'Dane osobowe',
+                    icon: Icons.badge_outlined,
+                    children: [
+                      _buildDetailRow(Icons.wc_outlined, 'Płeć', k.geschlecht),
+                      _buildDetailRow(Icons.cake_outlined, 'Data urodzenia', k.geburtsdatum?.isNotEmpty == true ? k.geburtsdatum! : 'Nie podano'),
+                      _buildDetailRow(Icons.phone_outlined, 'Telefon', k.telNr.isNotEmpty ? k.telNr : 'Nie podano'),
+                      _buildDetailRow(Icons.favorite_outline, 'Stan cywilny', k.familienstand),
+                      _buildDetailRow(Icons.money_outlined, 'Stawka dniowa', k.tagessatz != null ? '${k.tagessatz} € / dzień' : 'Nie podano'),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  if (k.vornameAnsprechperson.trim().isNotEmpty) ...[
+                    _buildInfoCard(
+                      title: 'Osoba do kontaktu',
+                      icon: Icons.badge_outlined,
+                      children: [
+                        _buildDetailRow(Icons.person, 'Imię', k.vornameAnsprechperson),
+                        _buildDetailRow(Icons.person_outlined, 'Nazwisko', k.nachnameAnsprechperson),
+                        _buildDetailRow(Icons.phone_outlined, 'Telefon', k.telNrAnsprechperson),
+                        _buildDetailRow(Icons.home_outlined, 'Adres', k.anschriftAnsprechperson),
+                        _buildDetailRow(Icons.alternate_email, 'Mail', k.emailAnsprechperson),
+                        _buildDetailRow(Icons.favorite, 'Relacja', k.bezugAnsprechperson),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  _buildInfoCard(
+                    title: 'Zdrowie i choroby',
+                    icon: Icons.verified_outlined,
+                    children: [
+                      _buildDetailRow(Icons.verified_outlined, 'Stopień opieki', k.pflegegrad != null ? 'Pflegegrad ${k.pflegegrad}' : 'Brak'),
+                      _buildDetailRow(Icons.monitor_weight_outlined, 'Waga', k.gewicht != null ? '${k.gewicht} kg' : 'Nie podano'),
+                      _buildDetailRow(Icons.height_outlined, 'Wzrost', k.groesse != null ? '${k.groesse} cm' : 'Nie podano'),
+                      _buildDetailRow(
+                        Icons.medication_outlined,
+                        'Dzielenie leków',
+                        k.medikamenteVerteilung.isEmpty
+                            ? 'Nie określono'
+                            : k.medikamenteVerteilung.map((id) => KundeOptions.findLabel(KundeOptions.medikamenteVerteilung, id)).join(' oraz '),
+                      ),
+                      const Divider(height: 12),
+                      const SizedBox(height: 8),
+                      const Row(
+                        children: [
+                          Icon(Icons.wc_outlined, size: 18, color: Colors.deepPurple),
+                          SizedBox(width: 8),
+                          Text(
+                            'Toaleta i fizjologia',
+                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.black87),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      () {
+                        final items = k.toilettenGang.map((id) => KundeOptions.findLabel(KundeOptions.toilettenGang, id)).toList();
+                        if (k.krankheiten.contains('inkontinenz') && !k.toilettenGang.contains('inkontinenz')) {
+                          items.add('Inkontynencja moczowa');
+                        }
+                        if (k.hilfsmittel.contains('toilettenstuhl') && !k.toilettenGang.contains('toilettenstuhl')) {
+                          items.add('Krzesło toaletowe');
+                        }
+
+                        if (items.isEmpty) {
+                          return const Text('Samodzielnie / Brak problemów', style: TextStyle(color: Colors.grey, fontSize: 13));
+                        }
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: items.map((label) {
+                            final isCritical = label.toLowerCase().contains('cewnik') || label.toLowerCase().contains('stomia');
+                            return Chip(
+                              avatar: Icon(
+                                isCritical ? Icons.warning_amber_rounded : Icons.check_circle_outline,
+                                size: 15,
+                                color: isCritical ? Colors.amber.shade900 : Colors.deepPurple,
+                              ),
+                              label: Text(label),
+                              backgroundColor: isCritical ? Colors.amber.shade50 : Colors.deepPurple.shade50,
+                              side: BorderSide(color: isCritical ? Colors.amber.shade200 : Colors.deepPurple.shade100),
+                            );
+                          }).toList(),
+                        );
+                      }(),
+                      const SizedBox(height: 10),
+                      const Divider(height: 12),
+                      const SizedBox(height: 12),
+                      const Text('Choroby', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.black54)),
+                      const SizedBox(height: 8),
+                      if (k.krankheiten.isEmpty)
+                        const Text('Brak zdiagnozowanych chorób', style: TextStyle(color: Colors.grey))
+                      else
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: k.krankheiten.map((id) {
+                            final label = KundeOptions.findLabel(KundeOptions.krankheiten, id);
+                            return Chip(
+                              avatar: const Icon(Icons.healing, size: 16, color: Colors.deepPurple),
+                              label: Text(label),
+                              backgroundColor: Colors.deepPurple.shade50,
+                              side: BorderSide(color: Colors.deepPurple.shade100),
+                            );
+                          }).toList(),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildInfoCard(
+                    title: 'Wymagane czynności i pomoce',
+                    icon: Icons.assignment_outlined,
+                    children: [
+                      if (k.hilfsarbeiten.isEmpty && k.hausarbeiten.isEmpty && k.hilfsmittel.isEmpty)
+                        const Text('Brak zdefiniowanych zadań', style: TextStyle(color: Colors.grey))
+                      else ...[
+                        if (k.hilfsarbeiten.isNotEmpty) ...[
+                          const Text(
+                            'Pomoc przy osobie:',
+                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.black54),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: k.hilfsarbeiten.map((id) {
+                              return Chip(
+                                label: Text(KundeOptions.findLabel(KundeOptions.hilfsarbeiten, id)),
+                                backgroundColor: Colors.purple.shade50,
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        if (k.hausarbeiten.isNotEmpty) ...[
+                          const Text(
+                            'Prowadzenie domu:',
+                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.black54),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: k.hausarbeiten.map((id) {
+                              return Chip(
+                                label: Text(KundeOptions.findLabel(KundeOptions.hausarbeiten, id)),
+                                backgroundColor: Colors.grey.shade100,
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        if (k.hilfsmittel.isNotEmpty) ...[
+                          const Text(
+                            'Dostępne pomoce:',
+                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.black54),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              if (k.hilfsmittel.contains('pflegedienst'))
+                                Chip(
+                                  avatar: const Icon(Icons.local_hospital_outlined, size: 16, color: Colors.deepPurple),
+                                  label: Text(
+                                    k.pflegedienstHaeufigkeit != null && k.pflegedienstHaeufigkeit!.isNotEmpty
+                                        ? 'Pflegedienst: ${k.pflegedienstHaeufigkeit}'
+                                        : 'Pflegedienst',
+                                    style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.deepPurple),
+                                  ),
+                                  backgroundColor: Colors.deepPurple.shade50,
+                                  side: BorderSide(color: Colors.deepPurple.shade200),
+                                ),
+                              ...k.hilfsmittel.where((id) => id != 'pflegedienst').map((id) {
+                                return Chip(
+                                  label: Text(KundeOptions.findLabel(KundeOptions.hilfsmittel, id)),
+                                  backgroundColor: Colors.grey.shade100,
+                                );
+                              }),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildInfoCard(
+                    title: 'Wymogi dotyczące opiekuna',
+                    icon: Icons.badge_outlined,
+                    children: [
+                      _buildCheckRow(Icons.smoke_free_outlined, 'Niepaląca osoba', k.hasHilfsarbeiten('rauchen')),
+                      _buildCheckRow(Icons.nightlight_round_outlined, 'Opieka w nocy', k.hasHilfsarbeiten('nachtarbeiten')),
+                      _buildCheckRow(Icons.yard_outlined, 'Prace w ogrodzie', k.hasHilfsarbeiten('gartenarbeiten')),
+                      _buildDetailRow(Icons.translate_outlined, 'Znajomość niemieckiego', k.deutschForderungen),
+                      _buildDetailRow(Icons.wc_outlined, 'Preferowana płeć opiekuna', k.betreuerGeschlecht),
+                      _buildDetailRow(Icons.directions_car_outlined, 'Prawo jazdy', k.fuehrerschein),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildInfoCard(
+                    title: 'Warunki mieszkaniowe',
+                    icon: Icons.badge_outlined,
+                    children: [
+                      _buildDetailRow(Icons.location_city_outlined, 'Miejsce pobytu', k.betreuungsOrt),
+                      _buildDetailRow(Icons.night_shelter_outlined, 'Sytuacja mieszkalna', k.wohnortSituation),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Wyposażenie pokoju:',
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.grey),
+                      ),
+                      const SizedBox(height: 6),
+                      if (k.zimmerausstattung.isEmpty)
+                        const Text('Brak zdefiniowanego wyposażenia', style: TextStyle(color: Colors.black54))
+                      else
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: k.zimmerausstattung.map((id) {
+                            final label = KundeOptions.findLabel(KundeOptions.zimmerausstattung, id);
+                            return Chip(
+                              avatar: const Icon(Icons.check, size: 16, color: Colors.deepPurple),
+                              label: Text(label),
+                              backgroundColor: Colors.deepPurple.shade50,
+                              side: BorderSide(color: Colors.deepPurple.shade100),
+                            );
+                          }).toList(),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+              if (_isFabOpen)
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: _closeFabMenu,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.35),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

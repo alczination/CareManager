@@ -48,7 +48,7 @@ class _AddTurnusDialogState extends State<AddTurnusDialog> {
       final start = widget.initialDate ?? DateTime.now();
       _selectedDateRange = DateTimeRange(
         start: DateTime(start.year, start.month, start.day),
-        end: DateTime(start.year, start.month, start.day).add(const Duration(days: 60)),
+        end: DateTime(start.year, start.month, start.day).add(const Duration(days: 30)),
       );
 
       if (widget.betreuerList.isNotEmpty) {
@@ -219,8 +219,77 @@ class _AddTurnusDialogState extends State<AddTurnusDialog> {
               items: kundeItems,
               onChanged: (val) => setState(() => _selectedKundeId = val),
             ),
+            if (kundeMatch != null) ...[
+              const SizedBox(height: 6),
+              Builder(builder: (context) {
+                final bedarf = kundeMatch.datumBedarf;
+                final hasBedarf = bedarf != null && bedarf.trim().isNotEmpty;
+                final isImmediate = !hasBedarf ||
+                  bedarf.toLowerCase().contains('zaraz') ||
+                  bedarf.toLowerCase().contains('sofort');
+                final badgeColor = isImmediate ? Colors.deepOrange : Colors.deepPurple;
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: badgeColor.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: badgeColor.withValues(alpha: 0.25)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        isImmediate ? Icons.bolt : Icons.event_available,
+                        size: 16,
+                        color: badgeColor,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          isImmediate ? 'Opieka potrzebna: Od zaraz' : 'Opieka potrzebana od: $bedarf',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: badgeColor.shade800,
+                          ),
+                        ),
+                      ),
+                      if (hasBedarf && !isImmediate)
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            foregroundColor: Colors.deepPurple.shade900,
+                          ),
+                          onPressed: () {
+                            try {
+                              final parts = bedarf.split('.');
+                              if (parts.length == 3) {
+                                final d = int.parse(parts[0]);
+                                final m = int.parse(parts[1]);
+                                final y = int.parse(parts[2]);
+                                final newStart = DateTime(y, m, d);
+                                setState(() {
+                                  _selectedDateRange = DateTimeRange(
+                                    start: newStart,
+                                    end: newStart.add(Duration(days: daysCount > 0 ? daysCount - 1 : 30)),
+                                  );
+                                });
+                              }
+                            } catch (_) {}
+                          },
+                          child: const Text(
+                            'Ustaw jako start',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              }),
+            ],
             const SizedBox(height: 16),
-
             // 3. Zakres dat
             const Text('Czas trwania wyjazdu', style: TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
