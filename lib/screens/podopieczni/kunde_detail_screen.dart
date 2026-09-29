@@ -1,10 +1,13 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/kunde.dart';
 import '../../models/turnus.dart';
+import '../../models/betreuer.dart';
 import '../../services/pdf_service.dart';
 import '../../services/turnus_service.dart';
 import 'kunde_edit_screen.dart';
@@ -23,9 +26,16 @@ class KundeDetailScreen extends StatefulWidget {
   State<KundeDetailScreen> createState() => _KundeDetailScreenState();
 }
 
-class _KundeDetailScreenState extends State<KundeDetailScreen>
-    with SingleTickerProviderStateMixin {
+class _KundeDetailScreenState extends State<KundeDetailScreen> with SingleTickerProviderStateMixin {
+  List<Turnus> _kundeTurnusy = [];
+  List<Betreuer> _allBetreuer = [];
+  bool _isLoadingTurnusy = true;
+
+  static const String _turnusStorageKey = 'turnus_database_v1';
+  static const String _betreuerStorageKey = 'betreuer_database_v1';
+  
   late Kunde _currentKunde;
+
   late AnimationController _fabAnimationController;
   late Animation<double> _expandAnimation;
   bool _isFabOpen = false;
@@ -43,6 +53,7 @@ class _KundeDetailScreenState extends State<KundeDetailScreen>
       curve: Curves.easeOutBack,
       reverseCurve: Curves.easeIn,
     );
+    _loadData();
   }
 
   @override
@@ -71,6 +82,72 @@ class _KundeDetailScreenState extends State<KundeDetailScreen>
     }
   }
 
+  Future<void> _loadData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final turnusJson = prefs.getString(_turnusStorageKey);
+    List<Turnus> matched = [];
+    if (turnusJson != null && turnusJson.isNotEmpty) {
+      try {
+        final List<dynamic> decoded = jsonDecode(turnusJson);
+        matched = decoded.map((e) => Turnus.fromJson(e)).where((t) => t.kundeId == _currentKunde.id).toList();
+        matched.sort((a, b) => b.startDate.compareTo(a.startDate));
+      } catch (_) {}
+    }
+    final bJson = prefs.getString(_betreuerStorageKey);
+    List<Betreuer> bList = [];
+    if (bJson != null && bJson.isNotEmpty) {
+      try {
+        final List<dynamic> decoded = jsonDecode(bJson);
+        bList = decoded.map((e) => Betreuer.fromJson(e)).toList();
+      } catch (_) {}
+    }
+    if (mounted) {
+      setState(() {
+        _kundeTurnusy = matched;
+        _allBetreuer = bList;
+        _isLoadingTurnusy = false;
+      });
+    }
+  }
+
+  Future<void> _saveTurnusList(List<Turnus> list) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_turnusStorageKey, jsonEncode(list.map((t) => t.toJson()).toList()));
+  }
+
+  Future<void> _editTurnus(Turnus turnus) async {
+    final updated = await TurnusService.editAndSaveTurnus(
+      context: context,
+      turnusToEdit: turnus,
+      kundeList: [_currentKunde],
+    );
+
+    if (updated != null && mounted) {
+      await _loadData();
+      widget.onDataChanged?.call();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Zaktualizowano termin opieki!'),
+          backgroundColor: Colors.teal,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteTurnus(Turnus turnus) async {
+    final deleted = await TurnusService.confirmAndDeleteTurnus(
+      context: context, 
+      turnus: turnus,
+    );
+    if (deleted && mounted) {
+      await _loadData();
+      widget.onDataChanged?.call();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Usunięto wyjazd ze zlecenia')),
+      );
+    }
+  }
+
   Future<void> _addNewTurnusForThisKunde() async {
     _closeFabMenu();
     final createdTurnus = await TurnusService.planAndSaveTurnus(
@@ -78,6 +155,7 @@ class _KundeDetailScreenState extends State<KundeDetailScreen>
       lockedKunde: _currentKunde,
     );
     if (createdTurnus != null && mounted) {
+      await _loadData();
       widget.onDataChanged?.call();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -296,6 +374,10 @@ class _KundeDetailScreenState extends State<KundeDetailScreen>
     }
   }
 
+  String _formatDate(DateTime d) {
+    return '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
+  }
+
   Widget _buildSpeedDialItem({
     required IconData icon,
     required String label,
@@ -483,6 +565,61 @@ class _KundeDetailScreenState extends State<KundeDetailScreen>
               fontSize: 13,
               color: value ? Colors.green.shade800 : Colors.grey.shade600,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTurnusCard(Turnus t) {
+    final now = DateTime.now();
+    final today = DateTime.utc(now.year, now.month, now.day);
+    final isCurrent = !today.isBefore(t.startDate) && !today.isAfter(t.endDate);
+    final isFuture = today.isBefore(t.startDate);
+
+    final statusColor = isCurrent ? Colors.teal : (isFuture ? Colors.indigo : Colors.grey.shade600);
+    final statusLabel = isCurrent ? 'Aktualnie na miejscu' : (isFuture ? 'Zaplanowany wyjazd' : 'Zakończony turnus');
+    final days = t.endDate.difference(t.startDate).inDays + 1;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isCurrent ? Colors.teal.shade50.withValues(alpha: 0.5) : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isCurrent ? Colors.teal.shade200 : Colors.grey.shade300),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: statusColor.withValues(alpha: 0.15),
+                child: Icon(isCurrent ? Icons.verified_user_outlined : (isFuture ? Icons.event_available : Icons.history), size: 18, color: statusColor),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(t.betreuerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    Text(statusLabel, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
+                  ],
+                ),
+              ),
+              IconButton(icon: const Icon(Icons.edit_outlined, size: 18, color: Colors.deepPurple), onPressed: () => _editTurnus(t)),
+              IconButton(icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent), onPressed: () => _deleteTurnus(t)),
+            ],
+          ),
+          const Divider(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('${_formatDate(t.startDate)} – ${_formatDate(t.endDate)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+              Text('$days dni', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+            ],
           ),
         ],
       ),
@@ -886,6 +1023,36 @@ class _KundeDetailScreenState extends State<KundeDetailScreen>
                             );
                           }).toList(),
                         ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildInfoCard(
+                    title: 'Opiekunowie i historia zleceń (${_kundeTurnusy.length})',
+                    icon: Icons.assignment_ind_outlined,
+                    children: [
+                      if (_isLoadingTurnusy)
+                        const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(12),
+                            child: CircularProgressIndicator(),
+                          ),
+                        )
+                      else if (_kundeTurnusy.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            children: [
+                              Icon(Icons.info_outline, size: 18, color: Colors.grey.shade500),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Brak zaplanowanych wyjazdów',
+                                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        ..._kundeTurnusy.map((t) => _buildTurnusCard(t)),
                     ],
                   ),
                 ],

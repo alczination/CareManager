@@ -66,9 +66,11 @@ class _AddTurnusDialogState extends State<AddTurnusDialog> {
     if (jsonStr != null && jsonStr.isNotEmpty) {
       try {
         final List<dynamic> decoded = jsonDecode(jsonStr);
-        setState(() {
-          _allExistingTurnusy = decoded.map((e) => Turnus.fromJson(e)).toList();
-        });
+        if (mounted) {
+          setState(() {
+            _allExistingTurnusy = decoded.map((e) => Turnus.fromJson(e)).toList();
+          });
+        }
       } catch (_) {}
     }
   }
@@ -219,15 +221,30 @@ class _AddTurnusDialogState extends State<AddTurnusDialog> {
               items: kundeItems,
               onChanged: (val) => setState(() => _selectedKundeId = val),
             ),
+
+            // DYNAMICZNY BANER ZAPOTRZEBOWANIA KLIENTA
             if (kundeMatch != null) ...[
               const SizedBox(height: 6),
               Builder(builder: (context) {
-                final bedarf = kundeMatch.datumBedarf;
-                final hasBedarf = bedarf != null && bedarf.trim().isNotEmpty;
-                final isImmediate = !hasBedarf ||
-                  bedarf.toLowerCase().contains('zaraz') ||
-                  bedarf.toLowerCase().contains('sofort');
-                final badgeColor = isImmediate ? Colors.deepOrange : Colors.deepPurple;
+                // Filtrujemy turnusy klienta (z wyłączeniem edytowanego)
+                final clientTurnusy = _allExistingTurnusy.where((t) {
+                  if (isEditing && t.id == widget.turnusToEdit?.id) return false;
+                  return t.kundeId == kundeMatch.id;
+                }).toList();
+
+                final hasTurnus = clientTurnusy.isNotEmpty;
+
+                // Wyznaczamy najpóźniejszą datę zjazdu obecnego turnusu
+                final DateTime? latestEnd = hasTurnus
+                    ? clientTurnusy.map((t) => t.endDate).reduce((a, b) => a.isAfter(b) ? a : b)
+                    : null;
+
+                final displayText = latestEnd != null
+                    ? _formatDate(latestEnd)
+                    : (kundeMatch.datumBedarf?.isNotEmpty == true ? kundeMatch.datumBedarf! : 'od zaraz');
+
+                final badgeColor = hasTurnus ? Colors.teal : Colors.deepPurple;
+
                 return Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -239,45 +256,36 @@ class _AddTurnusDialogState extends State<AddTurnusDialog> {
                   child: Row(
                     children: [
                       Icon(
-                        isImmediate ? Icons.bolt : Icons.event_available,
+                        hasTurnus ? Icons.event_repeat : Icons.event_available,
                         size: 16,
                         color: badgeColor,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          isImmediate ? 'Opieka potrzebna: Od zaraz' : 'Opieka potrzebana od: $bedarf',
+                          'Opieka potrzebna od: $displayText',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
-                            color: badgeColor.shade800,
+                            color: hasTurnus ? Colors.teal.shade900 : Colors.deepPurple.shade900,
                           ),
                         ),
                       ),
-                      if (hasBedarf && !isImmediate)
+                      if (latestEnd != null)
                         TextButton(
                           style: TextButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             minimumSize: Size.zero,
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            foregroundColor: Colors.deepPurple.shade900,
+                            foregroundColor: Colors.teal.shade900,
                           ),
                           onPressed: () {
-                            try {
-                              final parts = bedarf.split('.');
-                              if (parts.length == 3) {
-                                final d = int.parse(parts[0]);
-                                final m = int.parse(parts[1]);
-                                final y = int.parse(parts[2]);
-                                final newStart = DateTime(y, m, d);
-                                setState(() {
-                                  _selectedDateRange = DateTimeRange(
-                                    start: newStart,
-                                    end: newStart.add(Duration(days: daysCount > 0 ? daysCount - 1 : 30)),
-                                  );
-                                });
-                              }
-                            } catch (_) {}
+                            setState(() {
+                              _selectedDateRange = DateTimeRange(
+                                start: latestEnd,
+                                end: latestEnd.add(Duration(days: daysCount > 0 ? daysCount - 1 : 30)),
+                              );
+                            });
                           },
                           child: const Text(
                             'Ustaw jako start',
@@ -290,6 +298,7 @@ class _AddTurnusDialogState extends State<AddTurnusDialog> {
               }),
             ],
             const SizedBox(height: 16),
+
             // 3. Zakres dat
             const Text('Czas trwania wyjazdu', style: TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
@@ -414,7 +423,9 @@ class _AddTurnusDialogState extends State<AddTurnusDialog> {
               height: 48,
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(
-                  backgroundColor: validationIssues.any((i) => i.isSevere) ? Colors.orange.shade800 : Colors.teal,
+                  backgroundColor: validationIssues.any((i) => i.isSevere)
+                      ? Colors.orange.shade800
+                      : Colors.teal,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
                 icon: Icon(isEditing ? Icons.save : Icons.check),

@@ -276,6 +276,16 @@ class _BetreuerListScreenState extends State<BetreuerListScreen> {
     return '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}';
   }
 
+  bool _isBetreuerCurrentlyOnAssignment(Betreuer b) {
+    final now = DateTime.now();
+    final today = DateTime.utc(now.year, now.month, now.day);
+    return _turnusListe.any((t) {
+      final matchesPerson = t.betreuerId == b.id || t.betreuerName.trim().toLowerCase() == '${b.vorname} ${b.name}'.trim().toLowerCase();
+      final isOngoing = !today.isBefore(t.startDate) && !today.isAfter(t.endDate);
+      return matchesPerson && isOngoing;
+    });
+  }
+
   List<Betreuer> get _filteredBetreuerListe {
     final list = _betreuerListe.where((b) {
       final query = _searchQuery.toLowerCase().trim();
@@ -283,7 +293,10 @@ class _BetreuerListScreenState extends State<BetreuerListScreen> {
           b.vorname.toLowerCase().contains(query) ||
           b.name.toLowerCase().contains(query) ||
           b.anschrift.toLowerCase().contains(query);
-      final matchesAvailability = !_onlyAvailable || (b.isAvailable ?? true);
+
+      final isOnAssignment = _isBetreuerCurrentlyOnAssignment(b);
+      final isTrulyAvailable = (b.isAvailable ?? true) && !isOnAssignment;
+      final matchesAvailability = !_onlyAvailable || isTrulyAvailable;
       final level = (b.deutschKenntnisse ?? '').toLowerCase().trim();
       final hasGerman = level.isNotEmpty && level != 'brak' && level != 'keine';
       final matchesGerman = !_onlyGerman || hasGerman;
